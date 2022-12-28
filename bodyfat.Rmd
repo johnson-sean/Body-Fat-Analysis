@@ -1,0 +1,442 @@
+---
+title: "Analysis on Body Fat"
+author: 'Sean Johnson'
+date: "11/12/2020"
+output:
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r results=FALSE, warning=FALSE, message=FALSE}
+library(faraway) 
+library(tidyverse)
+theme_set(theme_minimal())
+library(glmnet)
+library(pls)
+#cool package that has function to search for the best model and where regsubsets is found
+library(leaps) 
+#contains dataset for bodyfat
+library(faraway) 
+library(gtsummary)
+```
+
+# Data
+
+The data set contains several physical measurements of 252 males. Most of the variables can be measured with a scale or tape measure. 
+
+Data frame with 252 observations on the following 19 variables.
+
+The data were supplied by Dr. A. Garth Fisher, Human Performance Research Center, Brigham Young University, Provo, Utah 84602, who gave permission to freely distribute the data and use them for non-commercial purposes. 
+
+Variables:
+
+* brozek – Percent body fat using Brozek’s equation, 457/Density - 414.2
+* siri – Percent body fat using Siri’s equation, 495/Density - 450
+* density – Density (gm/cm^2)
+* age – Age (yrs)
+* weight – Weight (lbs)
+* height – Height (inches)
+* adipos – BMI Adiposity index = Weight/Height^2 (kg/m^2)
+* free – Fat Free Weight = (1 - fraction of body fat) * Weight, using Brozek’s formula (lbs)
+* neck – Neck circumference (cm)
+* chest – Chest circumference (cm)
+* abdom – Abdomen circumference (cm) “at the umbilicus and level with the iliac crest”
+* hip – Hip circumference (cm)
+* dthigh – Thigh circumference (cm)
+* knee – Knee circumference (cm)
+* ankle – Ankle circumference (cm)
+* biceps – Extended biceps circumference (cm)
+* forearm – Forearm circumference (cm)
+* wrist – Wrist circumference (cm) “distal to the styloid processes”
+
+## Data Prep and Division of Data into Test and Train
+
+With the fat dataset in the library(faraway), the objective for this analysis is to fit a linear model to predict body fat (variable brozek) using the other variables available, except for siri (another way of computing body fat), density (it is used in the brozek and siri formulas) and free (it is computed using brozek formula).
+
+Additionally, the modeling is assumed to meet the assumptions for linear regression and will not be assessed within this project.
+
+```{r}
+seed = 1212
+
+set.seed(seed)
+fat = fat %>%
+select(brozek,age,weight,height,adipos, neck , chest, 
+                              abdom ,hip, thigh , knee , 
+                              ankle ,biceps, 
+                              forearm , wrist) 
+
+train = fat %>%
+  sample_frac(0.67)
+
+test = fat %>%
+  setdiff(train)
+```
+
+# Model Selection
+
+## OLS - Baseline
+
+```{r}
+lm = lm(brozek ~ age + weight + height + adipos + neck + 
+          chest + abdom + hip + thigh + knee + ankle + biceps + forearm + wrist, train)
+summary(lm)
+
+
+test = test %>%
+  mutate(predictions = predict(lm, test))
+
+slr_MSE_test = test %>%
+  summarize(slr_MSE_test = mean((brozek-predictions)^2))
+slr_MSE_test
+```
+
+>The test MSE is found to be 15.52162 using ordinary least squares.
+
+## Best Subsets 
+
+$R^2 (\tt{rsq})$, RSS, adjusted $R^2$, $C_p$, and BIC to carry out Best Subset selection on the training data.
+
+```{r}
+regfit_full = regsubsets(brozek ~ ., data=train) 
+reg_summary = summary(regfit_full)
+reg_summary
+names(reg_summary)
+reg_summary$rsq
+```
+
+```{r}
+par(mfrow = c(2,2))
+plot(reg_summary$rss, xlab = "Number of Variables", ylab = "RSS", type = "l")
+
+plot(reg_summary$adjr2, xlab = "Number of Variables", ylab = "Adjusted RSq", type = "l")
+adj_r2_max = which.max(reg_summary$adjr2)
+points(adj_r2_max, reg_summary$adjr2[adj_r2_max], col ="red", cex = 2, pch = 20)
+
+plot(reg_summary$cp, xlab = "Number of Variables", ylab = "Cp", type = "l")
+cp_min = which.min(reg_summary$cp) 
+points(cp_min, reg_summary$cp[cp_min], col = "red", cex = 2, pch = 20)
+
+plot(reg_summary$bic, xlab = "Number of Variables", ylab = "BIC", type = "l")
+bic_min = which.min(reg_summary$bic) 
+points(bic_min, reg_summary$bic[bic_min], col = "red", cex = 2, pch = 20)
+```
+
+>Here, one can see that according to BIC, the best performer is the model with 3 variables. According to $C_p$, 7 variables.Adjusted $R^2$ suggests that 8 might be best. 
+
+```{r}
+plot(regfit_full, scale="r2")
+```
+
+>As expected, $R^2$ is maximized by the model that contains all the predictors. The test MSE is 15.52162.
+
+```{r}
+plot(regfit_full, scale="adjr2")
+coef(regfit_full, 8)
+```
+
+```{r}
+lm = lm(brozek ~ age + weight + abdom + thigh + ankle + biceps +
+          forearm + wrist, train)
+summary(lm)
+
+test = test %>%
+  mutate(predictions = predict(lm, test))
+
+adj_MSE_test = test %>%
+  summarize(adj_MSE_test = mean((brozek-predictions)^2))
+adj_MSE_test
+```
+
+> The adjusted $R^2$ number of predictors selected is 8 and the predictors are age, weight, abdom, thigh, ankle, biceps, forearm, and wrist. The test MSE obtained is 15.12517.	 
+
+```{r}
+plot(regfit_full, scale="Cp")
+coef(regfit_full, 7)
+```
+
+```{r}
+lm = lm(brozek ~ age + weight + abdom + thigh + ankle + forearm + wrist, train)
+summary(lm)
+
+test = test %>%
+  mutate(predictions = predict(lm, test))
+
+Cp_MSE_test = test %>%
+  summarize(Cp_MSE_test = mean((brozek-predictions)^2))
+Cp_MSE_test
+```
+
+> The $C_p$ number of predictors selected is 7 and the predictors are age, weight, abdom, thigh, ankle, forearm, and wrist. The test MSE obtained is 15.06122 
+
+
+```{r}
+plot(regfit_full, scale="bic")
+coef(regfit_full, 3)
+```
+
+```{r}
+lm = lm(brozek ~ weight + abdom + wrist, train)
+summary(lm)
+
+test = test %>%
+  mutate(predictions = predict(lm, test))
+
+bic_MSE_test = test %>%
+  summarize(bic_MSE_test = mean((brozek-predictions)^2))
+bic_MSE_test
+```
+
+> The BIC number of predictors selected is 3 and the predictors are weight, abdom, and wrist.  
+The test MSE obtained is 14.90128.	
+
+## Best Subsets with Cross-Validation (CV)
+
+```{r}
+regfit_best_train = regsubsets(brozek ~ ., data=train, nvmax = 14) 
+summary(regfit_best_train)
+```
+
+```{r}
+test_mat = model.matrix (brozek~., data = test)
+```
+
+```{r}
+val_errors = rep(NA,14)
+
+# Iterate over each size i
+for(i in 1:14){
+    
+    # Extract the vector of predictors in the best fit model on i predictors
+    coefi = coef(regfit_best_train, id = i)
+    
+    # Make predictions using matrix multiplication of the test matirx and the coefficients vector
+    pred = test_mat[,names(coefi)]%*%coefi
+    
+    # Calculate the MSE
+    val_errors[i] = mean((test$brozek-pred)^2)
+}
+```
+
+
+```{r}
+# Find the model with the smallest error
+min = which.min(val_errors)
+min
+# Plot the errors for each model size
+plot(val_errors, type = 'b')
+points(min, val_errors[min][1], col = "red", cex = 2, pch = 20)
+```
+
+```{r}
+#Creating a predict function for regsubsets
+predict.regsubsets = function(object,newdata,id,...){
+      form = as.formula(object$call[[2]]) 
+      mat = model.matrix(form,newdata)   
+      coefi = coef(object,id=id)          
+      xvars = names(coefi)                
+      mat[,xvars]%*%coefi               
+}
+```
+
+```{r}
+regfit_best = regsubsets(brozek~., data = train, nvmax = 4)
+coef(regfit_best, 4)
+coef(regfit_best_train, 4)
+```
+
+```{r}
+lm = lm(brozek ~ weight + abdom + forearm + wrist, train)
+summary(lm)
+
+tbl_regression(lm)
+
+test = test %>%
+  mutate(predictions = predict(lm, test))
+
+bscv_MSE_test = test %>%
+  summarize(bscv_MSE_test = mean((brozek-predictions)^2))
+bscv_MSE_test
+```
+> The number of predictors selected is 4 and the predictors are weight, abdom, forearm, and wrist.  
+The test MSE obtained is 14.37278.		
+
+Leave-One-Out (LOO) CV
+```{r}
+LOO = matrix(NA, 169, 14) 
+  for (k in 1:169){
+       bestModel_CV = regsubsets(brozek ~ age + weight + height + adipos + neck + chest + abdom + hip + thigh + knee + ankle + biceps + forearm + wrist, data = train[-k,],nvmax = 14)
+    for (i in 1:14){
+          pred = predict(bestModel_CV, train[k,], id=i)
+          LOO[k,i] = (train$brozek[k]-pred)^2       
+    }
+  }
+  mse = apply(LOO, 2, mean)             
+      plot(mse , pch=20, type="b", xlab="Number of Predictors", ylab="MSE")
+```
+
+```{r}
+coef(bestModel_CV, 2)
+```
+
+```{r}
+lm = lm(brozek ~ weight + abdom, train)
+summary(lm)
+
+test = test %>%
+  mutate(predictions = predict(lm, test))
+
+loo_MSE_test = test %>%
+  summarize(loo_MSE_test = mean((brozek-predictions)^2))
+loo_MSE_test
+```
+>The LOO-CV number of predictors selected is 2 and the predictors are weight and abdom.  
+The test MSE obtained is 15.117.	
+
+## Ridge Regression
+
+```{r}
+set.seed(seed)
+x_train = model.matrix(brozek~., train)[,-1]
+x_test = model.matrix(brozek~., test)[,-1]
+#remove column 15 of predictions
+x_test = x_test[,1:14]
+
+y_train = train %>%
+  select(brozek) %>%
+  unlist() %>%
+  as.numeric()
+
+y_test = test %>%
+  select(brozek) %>%
+  unlist() %>%
+  as.numeric()
+
+grid = 10^seq(10, -2, length = 100)
+
+ridge_mod = cv.glmnet(x_train, y_train, alpha = 0, lambda=grid, thresh = 1e-12) 
+
+
+cv.out = cv.glmnet(x_train, y_train, alpha = 0) 
+plot(cv.out)
+bestlam = cv.out$lambda.min
+
+ridge_pred = predict(ridge_mod, s = bestlam, newx = x_test)
+
+rr_MSE_test = mean((ridge_pred - y_test)^2)
+rr_MSE_test
+```
+
+>The test MSE obtained with Ridge Regression is 17.55683	
+
+## LASSO
+
+```{r}
+set.seed(seed)
+x_train = model.matrix(brozek~., train)[,-1]
+x_test = model.matrix(brozek~., test)[,-1]
+x_test = x_test[,1:14]
+
+y_train = train %>%
+  select(brozek) %>%
+  unlist() %>%
+  as.numeric()
+
+y_test = test %>%
+  select(brozek) %>%
+  unlist() %>%
+  as.numeric()
+
+grid = 10^seq(10, -2, length = 100)
+
+lasso_mod = glmnet(x_train,y_train, alpha = 1, lambda = grid)
+
+cv.out = cv.glmnet(x_train, y_train, alpha = 1) 
+plot(cv.out)
+bestlam = cv.out$lambda.min
+
+lasso_pred = predict(lasso_mod, s = bestlam, newx = x_test) # Use best lambda to predict test data
+lasso_MSE_test = mean((lasso_pred - y_test)^2) 
+lasso_MSE_test
+```
+
+>The test MSE obtained with LASSO is 16.0948	
+
+## PCR
+
+```{r}
+set.seed(seed)
+pcr_fit = pcr(brozek~., data = train, scale = TRUE, validation = "CV")
+summary(pcr_fit)
+```
+
+```{r}
+validationplot(pcr_fit, val.type = "MSEP")
+```
+
+>One can see that the smallest cross-validation error occurs when $M = 13$ components are used.
+
+```{r}
+x_train = model.matrix(brozek~., train)[,-1]
+x_test = model.matrix(brozek~., test)[,-1]
+x_test = x_test[,1:14]
+
+y_train = train %>%
+  select(brozek) %>%
+  unlist() %>%
+  as.numeric()
+
+y_test = test %>%
+  select(brozek) %>%
+  unlist() %>%
+  as.numeric()
+
+pcr_pred = predict(pcr_fit, x_test, ncomp=13)
+pcr_MSE_test = mean((pcr_pred-y_test)^2)
+pcr_MSE_test
+```
+
+>The test MSE obtained with PCR is 15.48493.	
+
+## PLS
+
+```{r}
+set.seed(seed)
+pls_fit = plsr(brozek~., data = train, scale = TRUE, validation = "CV")
+summary(pls_fit)
+```
+
+```{r}
+validationplot(pls_fit, val.type = "MSEP")
+```
+
+>The lowest cross-validation error occurs when only $M = 10$ partial least
+squares dimensions are used. 
+
+```{r}
+x_train = model.matrix(brozek~., train)[,-1]
+x_test = model.matrix(brozek~., test)[,-1]
+x_test = x_test[,1:14]
+
+y_train = train %>%
+  select(brozek) %>%
+  unlist() %>%
+  as.numeric()
+
+y_test = test %>%
+  select(brozek) %>%
+  unlist() %>%
+  as.numeric()
+
+pls_pred = predict(pls_fit, x_test, ncomp = 10)
+pls_MSE_test = mean((pls_pred - y_test)^2)
+pls_MSE_test
+```
+
+>The test MSE is 14.79673.
+
+## Conclusions
+
+Based on test MSE, it appears that best subsets cross validation works the best from all the methods used with the given seed. 
